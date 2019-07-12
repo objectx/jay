@@ -1,0 +1,199 @@
+%{
+  package tree;
+
+  import java.io.InputStreamReader;
+  import java.io.IOException;
+  import java.io.Reader;
+  import java.io.StreamTokenizer;
+  import java.util.ArrayList;
+
+  /** demonstrates the use of generics and a factory pattern for tree building.
+      Note that the value stack contains <tt>Object</tt> and all r-value references
+      are cast. This will draw <tt>unchecked</tt> warnings.
+    */
+  @SuppressWarnings("unchecked") // maybe not a good idea?
+  public class Tree {
+%}
+
+%token	<Double> Number
+%type	<ArrayList<Node<?>>> prog
+%type   <Node<?>> expr
+%type	<Node<Node<?>>> binary, unary
+%type	<Node<Double>> leaf
+
+%left	'+' '-'
+%left	'*' '/'
+%right	UNARY
+
+%%
+
+prog: /* null */             { $$ = new ArrayList<Node<?>>(); }
+    | prog expr '\n'	     { $1.add($2); }
+				// ArrayList<Node<?>>	unchecked warning
+				// ArrayList<Node>	unchecked warning
+				// ArrayList<?>		error
+				// ArrayList		unchecked warning on add()
+    | prog '\n'
+    | prog error '\n'        { yyErrorFlag = 0; }
+
+expr: binary | unary | leaf
+    | '(' expr ')'           { $$ = $2; }
+
+binary: expr '+' expr        { $$ = add($1, $3); }
+      | expr '-' expr        { $$ = subtract($1, $3); }
+      | expr '*' expr        { $$ = multiply($1, $3); }
+      | expr '/' expr        { $$ = divide($1, $3); }
+
+unary: '+' expr %prec UNARY  { $$ = $2; }
+     | '-' expr %prec UNARY  { $$ = minus($2); }
+
+leaf: Number                 { $$ = leaf($1); }
+
+%%
+  /** start with<br>
+	no argument to suppress debugging<br>
+	0, 1, 2, or 3 to animate trapping input, output, or both<br>
+	other to trace
+    */
+  public static void main (String args []) {
+    jay.yydebug.yyDebug debug = null;
+    if (args.length > 0)
+      try {
+	int trace = Integer.parseInt(args[0]);
+	// don't touch yyAnim (starts AWK) until you mean it...
+        debug = new jay.yydebug.yyAnim("Arith", trace);
+      } catch (NumberFormatException nfe) {
+        debug = new jay.yydebug.yyDebugAdapter();
+      }
+    Scanner scanner = new Scanner(new InputStreamReader(System.in));
+    try {
+      System.out.println(new Tree().yyparse(scanner, debug));
+    } catch (IOException ie) { ie.printStackTrace(); }
+      catch (yyException ye) { System.err.println(ye); }
+  }
+  /** factory method: represent addition.
+    */
+  protected Add add (Node left, Node right) { return new Add(left, right); }
+  /** factory method: represent subtraction.
+    */
+  protected Subtract subtract (Node left, Node right) { return new Subtract(left, right); }
+  /** factory method: represent multiplication.
+    */
+  protected Multiply multiply (Node left, Node right) { return new Multiply(left, right); }
+  /** factory method: represent division.
+    */
+  protected Divide divide (Node left, Node right) { return new Divide(left, right); }
+  /** factory method: represent sign change.
+    */
+  protected Minus minus (Node right) { return new Minus(right); }
+  /** factory method: represent <tt>Double</tt> leaf.
+    */
+  protected Leaf leaf (Double number) { return new Leaf(number); }
+  /** common base class provides symbolic dump.
+    */
+  protected abstract static class Node<T> extends ArrayList<T> {
+    /** returns indented list of class names and leaf values.
+      */
+    public String toString () {
+      StringBuffer buf = new StringBuffer();
+      toString("", buf);
+      return buf.toString();
+    }
+    /** adds <tt>this</tt> to buffer.
+      */
+    protected void toString (String indent, StringBuffer buf) {
+      String name = getClass().getName();
+      toString(name.substring(name.lastIndexOf('$')+1), this, indent, buf);
+    }
+    /** adds <i>name</i> and (recursively) content of <i>a</i> to buffer.
+        Manages indentation, watches out for unknown classes.
+      */
+    protected void toString (String name, ArrayList a, String indent, StringBuffer buf) {
+      buf.append(indent).append(name);
+      indent += "  ";
+      for (int n = 0; n < a.size(); ++ n) {
+        Object o = a.get(n);
+        if (o instanceof Node) {
+          buf.append('\n'); ((Node)o).toString(indent, buf);
+        } else if (o instanceof ArrayList) {
+          buf.append('\n'); toString("ArrayList", (ArrayList)o, indent, buf);
+        } else if (n > 0 && a.get(n-1) instanceof ArrayList)
+          buf.append('\n').append(indent).append(o);
+        else
+          buf.append(' ').append(o);
+      }
+    }
+  }
+  /** base class for binary operations.
+    */
+  protected abstract static class Binary extends Node<Node> {
+    protected Binary (Node left, Node right) { add(left); add(right); }
+  }
+  /** represents addition.
+    */
+  protected static class Add extends Binary {
+    protected Add (Node left, Node right) { super(left, right); }
+  }
+  /** represents subtraction.
+    */
+  protected static class Subtract extends Binary {
+    protected Subtract (Node left, Node right) { super(left, right); }
+  }
+  /** represents multiplication.
+    */
+  protected static class Multiply extends Binary {
+    protected Multiply (Node left, Node right) { super(left, right); }
+  }
+  /** represents division.
+    */
+  protected static class Divide extends Binary {
+    protected Divide (Node left, Node right) { super(left, right); }
+  }
+  /** base class for unary operations.
+    */
+  protected abstract static class Unary extends Node<Node> {
+    protected Unary (Node right) { add(right); }
+  }
+  /** represents sign change.
+    */
+  protected static class Minus extends Unary {
+    protected Minus (Node right) { super(right); }
+  }
+  /** represents numeric leaf.
+    */
+  protected static class Leaf extends Node<Double> {
+    protected Leaf (Double number) { add(number); }
+  }
+
+  protected static class Scanner extends StreamTokenizer implements yyInput {
+    public Scanner (Reader r) {
+      super(r);
+      eolIsSignificant(true);		// need '\n'
+      ordinaryChar('/');		// gotcha: would start comment
+      ordinaryChar('-');		// gotcha: would start Number
+      commentChar('#');			// comments from # to end-of-line
+    }
+  
+    public boolean advance () throws IOException {
+      return ttype != TT_EOF && super.nextToken() != TT_EOF;
+    }
+  
+    public int token () {
+      value = null;
+      switch (ttype) {
+      case TT_EOF:	return 0;	// should not happen, assert false
+      case TT_EOL:	return '\n';
+      case TT_NUMBER:	value = new Double(nval);
+                        return Number;
+      case TT_WORD:	return yyErrorCode;
+      default:		return ttype;
+      }
+    }
+  
+    protected Object value;
+  
+    public Object value () {
+      return value;
+    }
+  }
+}
